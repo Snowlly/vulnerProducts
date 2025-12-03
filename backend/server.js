@@ -1,153 +1,90 @@
-const express = require('express')
+const express = require('express');
 const cors = require('cors');
-
-const app = express()
 const axios = require('axios');
-const sqlite3 = require('sqlite3').verbose();
+const path = require('path');
+const { Sequelize, DataTypes, Op } = require('sequelize');
 
-const port = 8000
+const app = express();
+const port = 8000;
 
 
-app.use(cors())
+app.use(cors());
+app.use(express.json());
 
-const db = new sqlite3.Database('./database.db', (err) => {
-    if (err) console.error(err.message);
-    else console.log('Connected to SQLite database.');
+
+const sequelize = new Sequelize({
+  dialect: 'sqlite',
+  storage: path.join(__dirname, 'database.db'),
+  logging: false, 
 });
 
 
-db.run(`CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  username TEXT UNIQUE NOT NULL,
-  email TEXT NOT NULL,
-  password TEXT NOT NULL,
-  is_admin INTEGER DEFAULT 0,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-)`);
-
-db.run(`CREATE TABLE IF NOT EXISTS products (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  title TEXT NOT NULL,
-  description TEXT,
-  price REAL NOT NULL,
-  image TEXT,
-  category TEXT,
-  rating_rate REAL,
-  rating_count INTEGER
-)`);
+const Product = require('./models/Product')(sequelize, DataTypes);
+const User = require('./models/User')(sequelize, DataTypes);
 
 
-async function insertRandomUsers() {
+
+sequelize.sync({ force: false, alter: false })
+  .then(() => console.log('Database synced without dropping tables'))
+  .catch(err => console.error('Sync error:', err));
+
+
+
+app.get('/products/search', async (req, res) => {
+  const q = req.query.q || '';
   try {
-    const urls = [1, 2, 3, 4, 5].map(() => axios.get('https://randomuser.me/api/'));
-    const results = await Promise.all(urls);
-    const users = results.map(r => r.data.results[0]);
-
-    users.forEach(u => {
-      const username = u.login.username;
-      const password = u.login.password;
-      const email = u.email;
-
-      db.run(
-        `INSERT INTO users (username, email, password, is_admin) VALUES (?, ?, ?, 0)`, 
-        [username, email, password],
-        (err) => {
-          if (err) console.error(err.message);
-        }
-      );
-
+    const products = await Product.findAll({
+      where: {
+        [Op.or]: [
+          { title: { [Op.like]: `%${q}%` } },
+          { description: { [Op.like]: `%${q}%` } },
+          { category: { [Op.like]: `%${q}%` } },
+        ],
+      },
     });
-    console.log('Inserted 5 random users into database.');
-  } catch (err) {
-    console.error('Error inserting users:', err.message);
+    res.json(products);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
-}
+});
 
-async function insertProductsFromAPI() {
+
+app.get('/products/:id', async (req, res) => {
   try {
-    const response = await axios.get('https://fakestoreapi.com/products');
-    const products = response.data;
-
-    products.forEach(p => {
-      const title = p.title.replace(/'/g, "''");
-      const description = p.description.replace(/'/g, "''");
-      const category = p.category.replace(/'/g, "''");
-      
-      db.run(
-        `INSERT INTO products (title, description, price, image, category, rating_rate, rating_count) 
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [title, description, p.price, p.image, category, p.rating.rate, p.rating.count],
-        (err) => {
-          if (err) console.error('Error inserting product:', err.message);
-        }
-      );
-    });
-    
-    console.log(`Inserted ${products.length} products into database.`);
-  } catch (err) {
-    console.error('Error fetching products:', err.message);
+    const product = await Product.findByPk(req.params.id);
+    res.json(product || {});
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
-}
-
-
-app.get('/generate-users', async (req, res) => {
-  await insertRandomUsers();
-  res.json({ success: true, message: 'Generated 5 random users' });
 });
 
-app.get('/generate-products', async (req, res) => {
-    await insertProductsFromAPI()
-    res.send('products generated')
-})
 
-
-app.get('/products/search', (req, res) => {
-  const searchTerm = req.query.q || '';
-
-  const like = `%${searchTerm}%`;
-
-  const query = `
-    SELECT * 
-    FROM products 
-    WHERE title LIKE ? 
-      OR description LIKE ? 
-      OR category LIKE ?`;
-
-  db.all(query, [like, like, like], (err, rows) => {
-    if (err) {
-      console.error('SQL Error:', err.message);
-      return res.status(500).json({ error: err.message });
-    }
-    res.json(rows);
-  });
+app.get('/products', async (req, res) => {
+  try {
+    const products = await Product.findAll();
+    res.json(products);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
-app.get('/products', (req, res) => {
-    db.all('SELECT * FROM products', [], (err, rows) => {
-        if (err)
-            return res.status(500).json({error : err.message})
-        res.json(rows)
-    });
+
+app.get('/test-products', async (req, res) => {
+  try {
+    const products = await Product.findAll({ limit: 5 });
+    console.log('First 5 products:', products.map(p => p.toJSON()));
+    res.json(products);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
-app.get('/products/:id', (req, res) => {
-  const productId = req.params.id;
-
-  const query = `SELECT * FROM products WHERE id = ?`;
-
-  db.get(query, [productId], (err, row) => {
-    if (err)
-      return res.status(500).json({ error: err.message });
-    res.json(row || {});
-  });
-});
-
+// Route racine
 app.get('/', (req, res) => {
-    res.send('Hello Ipssi v2!')
-})
+  res.send('Hello Ipssi v2!');
+});
 
-
-
+// Démarrage du serveur
 app.listen(port, () => {
-    console.log(`Example app listening on port ${port}`)
-})
+  console.log(`Server listening on port ${port}`);
+});
