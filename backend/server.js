@@ -49,11 +49,13 @@ async function insertRandomUsers() {
       const email = u.email;
 
       db.run(
-        `INSERT INTO users (username, email, password, is_admin) VALUES ('${username}', '${email}', '${password}', 0)`,
+        `INSERT INTO users (username, email, password, is_admin) VALUES (?, ?, ?, 0)`, 
+        [username, email, password],
         (err) => {
           if (err) console.error(err.message);
         }
       );
+
     });
     console.log('Inserted 5 random users into database.');
   } catch (err) {
@@ -102,14 +104,16 @@ app.get('/generate-products', async (req, res) => {
 app.get('/products/search', (req, res) => {
   const searchTerm = req.query.q || '';
 
-  console.log(req.query.q);
-  
-  
-  const query = `SELECT * FROM products WHERE title LIKE '%${searchTerm}%' OR description LIKE '%${searchTerm}%' OR category LIKE '%${searchTerm}%'`;
-  
-  console.log('Search query:', query);
-  
-  db.all(query, [], (err, rows) => {
+  const like = `%${searchTerm}%`;
+
+  const query = `
+    SELECT * 
+    FROM products 
+    WHERE title LIKE ? 
+      OR description LIKE ? 
+      OR category LIKE ?`;
+
+  db.all(query, [like, like, like], (err, rows) => {
     if (err) {
       console.error('SQL Error:', err.message);
       return res.status(500).json({ error: err.message });
@@ -127,16 +131,16 @@ app.get('/products', (req, res) => {
 });
 
 app.get('/products/:id', (req, res) => {
-    const productId = req.params.id
+  const productId = req.params.id;
 
-    const query = `SELECT * FROM products WHERE id = ${productId}`;
+  const query = `SELECT * FROM products WHERE id = ?`;
 
-    db.get(query, [], (err, rows) => {
-        if (err)
-            return res.status(500).json({error : err.message})
-        res.json(rows || {})
-    });
-})
+  db.get(query, [productId], (err, row) => {
+    if (err)
+      return res.status(500).json({ error: err.message });
+    res.json(row || {});
+  });
+});
 
 app.get('/', (req, res) => {
     res.send('Hello Ipssi v2!')
